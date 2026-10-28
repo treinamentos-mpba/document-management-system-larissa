@@ -60,53 +60,6 @@ router.get(
   documentsController.download,
 );
 
-router.use((error, request, response, next) => {
-  if (response.headersSent) return next(error);
-
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return documentsController.sendError(
-        response,
-        413,
-        'FILE_TOO_LARGE',
-        'O arquivo excede o limite de 10 MiB.',
-      );
-    }
-
-    if (error.code === 'LIMIT_UNEXPECTED_FILE') {
-      return documentsController.sendError(
-        response,
-        400,
-        'FILE_REQUIRED',
-        'Envie um único arquivo no campo file.',
-      );
-    }
-  }
-
-  if (error.code === 'UNSUPPORTED_FILE_TYPE') {
-    return documentsController.sendError(
-      response,
-      415,
-      'UNSUPPORTED_FILE_TYPE',
-      'Formato de arquivo não permitido. Envie PDF, DOC, DOCX ou TXT.',
-    );
-  }
-
-  const routeErrors = {
-    '/upload': ['UPLOAD_FAILED', 'Não foi possível salvar o documento.'],
-    '/documents': ['LIST_FAILED', 'Não foi possível listar os documentos.'],
-  };
-  const [code, message] = routeErrors[request.path] || [
-    'DOWNLOAD_FAILED',
-    'Não foi possível baixar o documento.',
-  ];
-
-  return documentsController.sendError(
-    response,
-    error.statusCode || 500,
-    error.code || code,
-    error.statusCode ? error.message : message,
-  );
-});
+router.use(documentsController.handleError);
 
 module.exports = router;

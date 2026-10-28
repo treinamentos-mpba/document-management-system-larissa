@@ -126,7 +126,7 @@ export default function App() {
           </div>
 
           <form className="user-switcher" onSubmit={applyUserId}>
-            <label htmlFor="user-id">Identificador do usuário</label>
+            <label htmlFor="user-id">ID de usuário (sem autenticação)</label>
             <div className="user-switcher__controls">
               <input
                 id="user-id"

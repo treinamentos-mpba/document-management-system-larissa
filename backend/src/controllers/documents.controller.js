@@ -1,4 +1,5 @@
 const documentsService = require('../services/documents.service');
+const documentUploadService = require('../services/document-upload.service');
 
 function sendError(response, status, code, message) {
   return response.status(status).json({ error: { code, message } });
@@ -15,18 +16,15 @@ function requireUser(request, response, next) {
   return next();
 }
 
-function upload(request, response, next) {
+async function upload(request, response, next) {
   if (!request.file) {
     return sendError(response, 400, 'FILE_REQUIRED', 'Envie um arquivo no campo file.');
   }
 
   try {
-    const document = documentsService.createDocument(request.userId, request.file);
+    const document = await documentUploadService.uploadDocument(request.userId, request.file);
     return response.status(201).json({ document });
   } catch (error) {
-    error.statusCode = 500;
-    error.code = 'UPLOAD_FAILED';
-    error.message = 'Não foi possível salvar o documento.';
     return next(error);
   }
 }
@@ -37,33 +35,24 @@ function list(request, response, next) {
       documents: documentsService.listDocuments(request.userId),
     });
   } catch (error) {
-    error.statusCode = 500;
-    error.code = 'LIST_FAILED';
-    error.message = 'Não foi possível listar os documentos.';
     return next(error);
   }
 }
 
 function download(request, response, next) {
-  let document;
-  let filePath;
+  let download;
 
   try {
-    document = documentsService.findDocumentForDownload(request.params.id, request.userId);
-    if (!document) {
+    download = documentsService.getDocumentForDownload(request.params.id, request.userId);
+    if (!download) {
       return sendError(response, 404, 'DOCUMENT_NOT_FOUND', 'Documento não encontrado.');
     }
-
-    filePath = documentsService.getDocumentPath(document);
   } catch (error) {
-    error.statusCode = 500;
-    error.code = 'DOWNLOAD_FAILED';
-    error.message = 'Não foi possível baixar o documento.';
     return next(error);
   }
 
-  response.type(document.mimeType);
-  return response.download(filePath, document.originalName, (error) => {
+  response.type(download.document.mimeType);
+  return response.download(download.filePath, download.document.originalName, (error) => {
     if (!error) return;
 
     if (error.code === 'ENOENT' && !response.headersSent) {
@@ -72,11 +61,44 @@ function download(request, response, next) {
 
     if (response.headersSent) return next(error);
 
-    error.statusCode = 500;
-    error.code = 'DOWNLOAD_FAILED';
-    error.message = 'Não foi possível baixar o documento.';
     return next(error);
   });
 }
 
-module.exports = { requireUser, upload, list, download, sendError };
+function handleError(error, request, response, next) {
+  if (response.headersSent) return next(error);
+
+  if (error.code === 'LIMIT_FILE_SIZE') {
+    return sendError(response, 413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 10 MiB.');
+  }
+
+  if (error.code === 'UNSUPPORTED_FILE_TYPE') {
+    return sendError(
+      response,
+      415,
+      'UNSUPPORTED_FILE_TYPE',
+      'Formato ou conteúdo de arquivo não permitido.',
+    );
+  }
+
+  if (error.code?.startsWith('LIMIT_')) {
+    return sendError(response, 400, 'INVALID_MULTIPART', 'A requisição de upload é inválida.');
+  }
+
+  if (request.path === '/upload' && request.is('multipart/form-data') && !error.code) {
+    return sendError(response, 400, 'INVALID_MULTIPART', 'A requisição de upload é inválida.');
+  }
+
+  const routeErrors = {
+    '/upload': ['UPLOAD_FAILED', 'Não foi possível salvar o documento.'],
+    '/documents': ['LIST_FAILED', 'Não foi possível listar os documentos.'],
+  };
+  const [code, message] = routeErrors[request.path] || [
+    'DOWNLOAD_FAILED',
+    'Não foi possível baixar o documento.',
+  ];
+
+  return sendError(response, 500, code, message);
+}
+
+module.exports = { requireUser, upload, list, download, sendError, handleError };

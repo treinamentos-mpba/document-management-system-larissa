@@ -1,4 +1,5 @@
 const path = require('node:path');
+const fs = require('node:fs/promises');
 const { STORAGE_DIRECTORY } = require('../config/storage');
 
 const documents = new Map();
@@ -39,9 +40,18 @@ function resolveStoragePath(storageName) {
   return storagePath;
 }
 
+async function removeStorageFile(storageName) {
+  try {
+    await fs.unlink(resolveStoragePath(storageName));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
 module.exports = {
   create,
   findAllByOwner,
   findByIdAndOwner,
   resolveStoragePath,
+  removeStorageFile,
 };

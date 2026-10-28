@@ -1,6 +1,6 @@
 # Especificação - Document Management System
 
-> Especificação do MVP para orientar a implementação do Document Management System (DMS). Este documento descreve o comportamento desejado; os endpoints de documentos ainda não estão implementados.
+> Especificação do MVP do Document Management System (DMS). O contrato abaixo está implementado; `X-User-Id` permanece uma identidade de demonstração, não uma autenticação.
 
 ## 1. Objetivo
 
@@ -32,7 +32,8 @@ Permitir que cada usuário envie, liste e baixe seus documentos, mantendo os arq
 - O header `X-User-Id` deve estar presente e não pode ser vazio após remoção de espaços em branco. A aplicação usa esse valor para associar e filtrar documentos, sem considerá-lo uma credencial.
 - Após reiniciar o backend, os metadados em memória são perdidos. Os arquivos no disco podem continuar em `backend/storage`, mas não estarão disponíveis pela API sem seus metadados; limpeza e recuperação desses arquivos não fazem parte do MVP.
 - A aplicação não deve aceitar do cliente caminhos locais ou nomes de armazenamento. O nome físico do arquivo deve ser gerado pela aplicação e não derivado como caminho do nome original.
-- A checagem de extensão e MIME é uma validação de formato, não uma verificação de segurança do conteúdo.
+- O limite atual é por arquivo; não há quota total de storage, limite por usuário confiável ou rate limiting. A aplicação não deve ser exposta a clientes não confiáveis antes de definir e implementar esses controles.
+- A extensão, o MIME e a assinatura básica do conteúdo são verificados para identificar formatos incompatíveis. Isso não substitui análise antimalware nem torna os arquivos seguros.
 
 ## 3. Requisitos funcionais
 
@@ -53,7 +54,7 @@ Permitir que cada usuário envie, liste e baixe seus documentos, mantendo os arq
 | RNF-01 | Os arquivos enviados devem ser gravados exclusivamente no filesystem local da aplicação, em `backend/storage`, usando Multer com `diskStorage`. Não usar armazenamento externo. |
 | RNF-02 | Os metadados dos documentos devem permanecer em memória nesta fase. Reiniciar o processo não deve ser descrito como preservando a listagem. |
 | RNF-03 | Cada arquivo deve ter no máximo 10 MiB (10 × 1024 × 1024 bytes). O backend deve aplicar o limite durante o processamento do upload. |
-| RNF-04 | Os formatos permitidos são PDF, DOC, DOCX e TXT. O backend deve comparar extensão e MIME informado, rejeitar divergências e não confiar no nome enviado para construir caminhos. Essa validação não substitui análise antimalware. |
+| RNF-04 | Os formatos permitidos são PDF, DOC, DOCX e TXT. O backend deve comparar extensão e MIME informado e validar assinatura/conteúdo básico (PDF, OLE para DOC, pacote OOXML para DOCX e UTF-8 sem NUL para TXT). Essa validação não substitui análise antimalware. |
 | RNF-05 | O identificador do documento e o nome físico de armazenamento devem ser gerados pelo servidor e não devem colidir com arquivos existentes. O caminho resolvido precisa permanecer dentro de `backend/storage`. |
 | RNF-06 | A listagem e o download devem aplicar o filtro por proprietário no backend. Para não revelar a existência de documentos de terceiros, documento inexistente e documento de outro proprietário devem ter a mesma resposta `404`. |
 | RNF-07 | O backend deve tratar erros de upload e de filesystem no limite HTTP, sem expor stack traces, caminhos internos ou detalhes do filesystem nas respostas ao cliente. |
@@ -107,6 +108,7 @@ Envia um arquivo e registra seus metadados.
 
 - Multipart com exatamente um arquivo no campo `file`.
 - Formatos aceitos: PDF, DOC, DOCX e TXT.
+- O backend valida a extensão, o MIME e o conteúdo básico correspondente ao formato.
 - Tamanho máximo: 10 MiB.
 
 **Sucesso: `201 Created`**
@@ -132,8 +134,9 @@ O objeto de resposta não deve conter caminho local, nome físico de armazenamen
 | --- | --- | --- |
 | `400` | `INVALID_USER` | `X-User-Id` ausente ou vazio. |
 | `400` | `FILE_REQUIRED` | Campo `file` ausente ou sem arquivo. |
+| `400` | `INVALID_MULTIPART` | Corpo multipart malformado ou campo multipart inesperado. |
 | `413` | `FILE_TOO_LARGE` | Arquivo excede 10 MiB. |
-| `415` | `UNSUPPORTED_FILE_TYPE` | Extensão ou MIME não permitido, ou extensão e MIME incompatíveis. |
+| `415` | `UNSUPPORTED_FILE_TYPE` | Extensão, MIME ou assinatura/conteúdo não permitido ou incompatível. |
 | `500` | `UPLOAD_FAILED` | Falha inesperada ao gravar arquivo ou registrar metadados. A resposta não expõe detalhes internos. |
 
 Se a gravação falhar, nenhum metadado deve ser registrado. Se ocorrer falha após a gravação e antes de concluir o registro, o backend deve tentar remover o arquivo parcial para evitar órfãos.
@@ -214,10 +217,10 @@ Endpoint operacional já implementado no seed. Retorna `200 OK` e `{ "status": "
 
 ### Estado atual do repositório
 
-- Backend em Node.js e Express, CommonJS. `backend/src/app.js` configura `express.json()`, expõe `GET /health` e exporta o app. As rotas de documentos ainda não estão implementadas.
-- Dependências atuais do backend incluem Express e Multer. Os diretórios `routes/`, `controllers/`, `services/` e `repositories/` formam a estrutura prevista.
+- Backend em Node.js e Express, CommonJS. `backend/src/app.js` configura `express.json()`, registra as rotas de documentos e expõe `GET /health`.
+- As rotas, controllers, services e repositories implementam upload, listagem e download; testes usam o runner nativo `node:test`.
 - A pasta `backend/storage` é o destino local obrigatório para os uploads.
-- Frontend em React e Vite, com módulos ES. `frontend/src/App.jsx` é atualmente uma tela inicial simples.
+- Frontend em React e Vite, com módulos ES. `frontend/src/App.jsx` monta o fluxo de upload, listagem e download, e `frontend/src/services/documentsApi.js` consome a API.
 - O proxy Vite encaminha `/api` para `http://localhost:3000` e remove o prefixo antes da requisição chegar ao backend.
 - O backend usa o runner nativo de testes do Node (`node:test`).
 
@@ -234,11 +237,11 @@ Endpoint operacional já implementado no seed. Retorna `200 OK` e `{ "status": "
 
 ## 8. Plano de execução
 
-As etapas abaixo são um roteiro futuro. Esta especificação não executa nenhuma delas.
+As etapas de implementação do MVP foram concluídas. A validação manual completa em navegador continua recomendada antes de qualquer implantação.
 
-1. Definir os modelos de metadados em memória e o repositório responsável por persistir os arquivos localmente com Multer `diskStorage`, incluindo geração de nomes únicos e limites de upload.
-2. Implementar os serviços de upload, listagem e download, aplicando o filtro por `owner` e os casos de erro definidos nesta especificação.
-3. Criar controllers e rotas Express para `POST /upload`, `GET /documents` e `GET /documents/:id/download`, mantendo `GET /health`.
-4. Adicionar testes backend com `node:test` para validação de arquivo, limite de tamanho, persistência local, isolamento entre usuários, respostas HTTP, download e erros de filesystem.
-5. Criar no frontend os serviços de API e a interface para upload, listagem, estados vazios/erro e download, usando o proxy `/api` existente.
-6. Executar a compilação do frontend e testes do backend; validar manualmente o fluxo completo de upload, listagem e download, incluindo dois usuários e falhas esperadas.
+1. Criar o repositório de metadados em memória e armazenar arquivos localmente com Multer `diskStorage`.
+2. Implementar os serviços de upload, listagem e download com filtro por `owner`.
+3. Registrar controllers e rotas Express para os três endpoints, mantendo `GET /health`.
+4. Cobrir limites, tipos, rollback, isolamento, erros HTTP e download com testes `node:test`.
+5. Implementar cliente API e interface React para upload, listagem e download via proxy `/api`.
+6. Executar a compilação do frontend e os testes do backend; realizar validação manual do fluxo completo antes da implantação.
